@@ -15,31 +15,70 @@
       "replaces": "SYSTEM_PROMPT.md section 5 (Generate the song in CloneVoice)",
       "rationale": "Chiquibu songs are written and generated in Suno before the video pipeline starts. The song is an input to this workflow, never an output of it.",
       "clonevoice_used": false,
-      "accepted_inputs": [
-        {
-          "kind": "local_file",
-          "description": "Absolute path to a finished MP3 exported from Suno.",
-          "value": "{{SUNO_MP3_PATH}}"
-        },
-        {
-          "kind": "url",
-          "description": "Direct audio URL the signed-in browser can fetch (Suno CDN or share link resolving to audio bytes).",
-          "value": "{{SUNO_MP3_URL}}"
+
+      "delivery_mode": {
+        "default": "manual_upload",
+        "modes": {
+          "manual_upload": {
+            "status": "primary",
+            "description": "The user selects the MP3 themselves in the app's own file dialog, at the two upload points. The agent pauses, then verifies the result before continuing. Requires no file access and no URL.",
+            "user_present_at": [
+              "artistly_filepond_upload (immediately after GO)",
+              "videoexpress_library_upload (~30-40 min later, after clip generation)"
+            ],
+            "diverges_from_upstream": true,
+            "divergence_note": "Upstream forbids delegating browser work to the user (changelog v2.7.0 removed user-delegated steps). This overlay reinstates it for THESE TWO UPLOAD STEPS ONLY. The prohibition still applies everywhere else: the agent never hands back clicking, navigation, generation, timeline work, saving or export."
+          },
+          "os_file_picker": {
+            "status": "future_optimisation",
+            "description": "The agent drives the operating system's file dialog and types the path, making the run unattended.",
+            "requires": "A runtime with desktop control on the user's machine, plus the absolute path to the MP3.",
+            "diverges_from_upstream": true,
+            "divergence_note": "Upstream mandates DOM selectors and JavaScript events only, never OS dialogs or screenshot coordinates. Enable this only once the VideoExpress upload control is a known quantity."
+          },
+          "url": {
+            "status": "rarely_usable",
+            "description": "Fetch the audio bytes in-browser from a URL, per upstream section 0.4.",
+            "hard_requirement": "The host MUST send permissive CORS headers AND return raw audio bytes. A static bucket configured for cross-origin reads (S3, R2) qualifies.",
+            "verified_failures": [
+              {
+                "source": "Suno share link (suno.com/s/...)",
+                "tested": "2026-10-29",
+                "result": "Unusable. The page exposes no audio URL; playback runs from a blob assembled client-side. The CloudFront origin IS fetchable cross-origin from app.artistly.ai, but returns bytes with no audio container signature (no ID3, no MPEG frame sync, no MP4 ftyp; served as application/octet-stream), consistent with an obfuscated or encrypted stream. It fails this overlay's integrity validation, correctly.",
+                "also_dead": "cdn1.suno.ai, cdn-o.suno.com, cdn1.suno.com and audiopipe.suno.ai all return 403/404 for the clip id."
+              },
+              {
+                "source": "Google Drive share link",
+                "tested": "2026-10-29",
+                "result": "Unusable. Google sends no Access-Control-Allow-Origin on file downloads, so drive.google.com/uc and drive.usercontent.google.com both fail the cross-origin fetch regardless of sharing settings. The Drive v3 API endpoint does allow CORS but returns 403 without an OAuth token, and injecting a token is out of bounds - this workflow never handles credentials."
+              }
+            ],
+            "do_not_retest": "Both failures above are structural, not transient. Do not spend run time rediscovering them."
+          }
         }
-      ],
+      },
       "validation": {
         "min_bytes": 16384,
         "require_audio_mime_or_mp3_signature": true,
         "note": "Same binary-integrity validation as upstream section 0.4 step 3. Never play or preview the audio.",
+        "applies_to_manual_upload": "A user-performed upload is NEVER assumed to have worked. The agent verifies the landed result with the same evidence it would demand of its own upload, and treats a success toast alone as no evidence at all.",
         "record_in_workflow_state": [
           "source_kind",
           "file_name",
           "byte_size",
           "mime_type",
           "audio_seconds",
-          "transfer_method"
+          "transfer_method",
+          "uploaded_by"
         ],
-        "transfer_method": "suno_local_filepond | suno_url_filepond"
+        "transfer_method": "manual_filepond | manual_ve_library | suno_local_filepond | suno_url_filepond",
+        "uploaded_by": "user | agent"
+      },
+
+      "preferred_source_file": {
+        "format": "Suno's own MP3 export",
+        "rationale": "Verified on 2026-10-29: Suno's MP3 export carries a valid ID3 header and embedded cover art at ~184 kbps, and avoids the generation loss of re-encoding a WAV. A WAV export also works but is roughly 8x the bytes (28.8 MB vs 3.45 MB for a 2:30 track), which slows the upload step the storyboard waits on.",
+        "wav_handling": "If only a WAV exists, convert to MP3 before the run rather than uploading the WAV. Artistly's acceptance of WAV is unverified."
       },
       "duration_expectation": {
         "typical_seconds_min": 120,
@@ -52,10 +91,11 @@
       "replaces": "SYSTEM_PROMPT.md section 1 (First response: ask exactly two questions)",
       "ask_exactly": [
         {
-          "id": "song_file",
-          "question_es": "¿Cuál es el MP3 de Suno? Dame la ruta del archivo o la URL directa del audio.",
-          "question_en": "Which Suno MP3? Give me the file path or a direct audio URL.",
-          "never_guess": true
+          "id": "song",
+          "question_es": "¿Qué canción? Dime el título y ten listo el MP3 de Suno: te pediré que lo subas tú mismo en dos momentos.",
+          "question_en": "Which song? Give me the title and have the Suno MP3 ready - I will ask you to upload it yourself at two points.",
+          "never_guess": true,
+          "note": "In manual_upload mode the agent needs no path and no URL, only the title for naming. The title may also be read from the uploaded filename once the first upload completes."
         },
         {
           "id": "ratio",
@@ -141,9 +181,9 @@
       "replaces": "SYSTEM_PROMPT.md section 11 (Import and place the CloneVoice music)",
       "upstream_path_unavailable": "Import from CloneVoice.ai",
       "upstream_path_unavailable_reason": "The track never existed in CloneVoice, so the CloneVoice import panel will not list it.",
-      "required_path": "Upload the Suno MP3 into the VideoExpress media library through the Import Media sidebar's own file-upload control, then place it on the timeline exactly as upstream section 11 steps 7-8 describe.",
+      "required_path": "Get the Suno MP3 into the VideoExpress media library through the Import Media sidebar's own file-upload control, then place it on the timeline exactly as upstream section 11 steps 7-8 describe.",
       "selector_status": "UNVERIFIED",
-      "selector_discovery_rule": "The DOM selector for the VideoExpress local-upload control has not been verified in this fork. On the first run, locate it inside the Import Media / Text to Speech sidebar using the section 0.2 in-page read approach, then record the working selector under dom_api_contract in WORKFLOW_STATE.json so later runs reuse it instead of rediscovering it. Do not guess a selector and do not hand the upload to the user.",
+      "selector_discovery_rule": "In manual_upload mode the user operates the upload control, so no selector is needed to perform it - but the agent still locates the Import Media sidebar to verify the result, and should record any working upload selector it observes under dom_api_contract in WORKFLOW_STATE.json. That recorded selector is what later enables os_file_picker or a fully agent-driven upload. Never guess a selector.",
       "verification_unchanged": "Poll GET /api/library/get_media/4?categoryId=<CATEGORY_ID>&orderBy=id&orderDir=desc for a result whose name matches the uploaded file; capture its VideoExpress media id and duration in ms. That duration remains the authoritative audio_end. Do not trust the success toast alone.",
       "placement_unchanged": "Drag the audio library-item onto track-row index 1 with its left edge at 0. Require exactly one audio brick on track 2."
     },
