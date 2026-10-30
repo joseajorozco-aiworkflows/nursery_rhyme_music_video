@@ -1,0 +1,162 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "overlay_version": "1.0.0",
+  "overlay_name": "Chiquibu Spanish Children's Music Video Overlay",
+  "applies_to_base_config_version": "2.12.0",
+  "precedence": "This overlay is read AFTER WORKFLOW.json and SYSTEM_PROMPT.md and overrides them where the two conflict. Anything not named here keeps its upstream behaviour unchanged.",
+  "design_rule": "No upstream file is edited. All divergence lives in CHIQUIBU_CONFIG.json and CHIQUIBU_OVERLAY.md so the fork stays mergeable with ai-playbooks/nursery_rhyme_music_video.",
+
+  "overlay": {
+    "trigger_phrase": "Generar video musical Chiquibu",
+    "timezone": "America/Mexico_City",
+
+    "song_source": {
+      "mode": "suno_mp3_import",
+      "replaces": "SYSTEM_PROMPT.md section 5 (Generate the song in CloneVoice)",
+      "rationale": "Chiquibu songs are written and generated in Suno before the video pipeline starts. The song is an input to this workflow, never an output of it.",
+      "clonevoice_used": false,
+      "accepted_inputs": [
+        {
+          "kind": "local_file",
+          "description": "Absolute path to a finished MP3 exported from Suno.",
+          "value": "{{SUNO_MP3_PATH}}"
+        },
+        {
+          "kind": "url",
+          "description": "Direct audio URL the signed-in browser can fetch (Suno CDN or share link resolving to audio bytes).",
+          "value": "{{SUNO_MP3_URL}}"
+        }
+      ],
+      "validation": {
+        "min_bytes": 16384,
+        "require_audio_mime_or_mp3_signature": true,
+        "note": "Same binary-integrity validation as upstream section 0.4 step 3. Never play or preview the audio.",
+        "record_in_workflow_state": [
+          "source_kind",
+          "file_name",
+          "byte_size",
+          "mime_type",
+          "audio_seconds",
+          "transfer_method"
+        ],
+        "transfer_method": "suno_local_filepond | suno_url_filepond"
+      },
+      "duration_expectation": {
+        "typical_seconds_min": 120,
+        "typical_seconds_max": 150,
+        "note": "Chiquibu tracks target 2:00-2:30. With the upstream constraint 3N <= ceil(audio_seconds) <= 10N this implies a viable storyboard count of roughly N = 12..50. Do not override N; it stays whatever Artistly returns."
+      }
+    },
+
+    "inputs": {
+      "replaces": "SYSTEM_PROMPT.md section 1 (First response: ask exactly two questions)",
+      "ask_exactly": [
+        {
+          "id": "song_file",
+          "question_es": "¿Cuál es el MP3 de Suno? Dame la ruta del archivo o la URL directa del audio.",
+          "question_en": "Which Suno MP3? Give me the file path or a direct audio URL.",
+          "never_guess": true
+        },
+        {
+          "id": "ratio",
+          "question_es": "¿El proyecto completo es Horizontal (16:9) o Vertical (9:16)?",
+          "question_en": "Should the complete project be Landscape (16:9) or Vertical (9:16)?",
+          "never_guess": true
+        }
+      ],
+      "optional_inputs": {
+        "lyrics_text": {
+          "value": "{{LYRICS_TEXT}}",
+          "purpose": "The Suno lyrics as plain text. Not required by the Nursery Rhymes agent (it reads identity from the audio), but required to write an accurate character-lock prompt if the Music Storyboard fallback is reached.",
+          "format_note": "Chiquibu lyrics carry bracketed structural tags ([Verse 1]) and bracketed production/mood lines. Strip all bracketed lines before using the text in any prompt field - they are production directions, not sung content."
+        },
+        "song_title": {
+          "value": "{{SONG_TITLE}}",
+          "purpose": "Overrides the inferred project title. If absent, infer from the MP3 filename."
+        },
+        "character_sheet": {
+          "value": "{{CHARACTER_DESCRIPTION}}",
+          "purpose": "A reusable character description for recurring Chiquibu protagonists, to keep one character visually consistent across releases."
+        }
+      },
+      "inference_rule": "Infer the project title, protagonist, story arc and export name from the song title, filename and lyrics. The ratio and the MP3 are never guessed."
+    },
+
+    "language": {
+      "output_language": "es-MX",
+      "replaces": "The upstream default of English",
+      "applies_to": [
+        "project title",
+        "export file name",
+        "storyboard style prompt (Music Storyboard fallback only)",
+        "all user-facing progress lines and the final report"
+      ],
+      "does_not_apply_to": [
+        "DOM selectors, API paths, JSON keys and WORKFLOW_STATE.json field names, which stay exactly as upstream defines them"
+      ],
+      "scene_prompt_language": "en",
+      "scene_prompt_language_rationale": "Video-generation prompts stay in English: the mouth-lock method in PROMPT_GUIDE.md is specified and validated in English, and mouth_lock_check matches English clauses. Spanish belongs in the song and the metadata, not in the generation prompt."
+    },
+
+    "visual_spec": {
+      "replaces": "The inferred visual treatment in SYSTEM_PROMPT.md section 3",
+      "style": "3D animated Pixar-style",
+      "palette": "warm colors",
+      "lighting": "soft lighting",
+      "required_clauses": [
+        "3D animated Pixar-style",
+        "warm color palette",
+        "soft lighting",
+        "no text, no letters, no numbers, no watermarks, no signage anywhere in frame"
+      ],
+      "no_text_rule": {
+        "binding": true,
+        "reason": "Chiquibu thumbnails and frames carry no baked-in text; titles are added at the channel level.",
+        "note": "This clause is additive to the mouth-lock prompt architecture and never displaces it. If a 150-character field cannot hold both, the mouth-lock clause wins and the no-text clause is dropped - mouth pose affects every frame."
+      },
+      "audience": "preschool and early-primary children, Mexican Spanish-speaking"
+    },
+
+    "branding": {
+      "channel": "Chiquibu",
+      "export_name_pattern": "{{SONG_TITLE}} (Canciones Infantiles) - Chiquibu",
+      "youtube_title_pattern": "{{SONG_TITLE}} (Canciones Infantiles)",
+      "title_suffix": "(Canciones Infantiles)",
+      "suffix_rule": "Applied to the YouTube title and the export name. Not applied to the VideoExpress internal project name, which stays short for findability.",
+      "project_name_pattern": "chiquibu-{{SONG_SLUG}}-{{RATIO}}",
+      "seo_note": "Channel keywords and per-video tags are configured in YouTube Studio and are out of scope for this workflow."
+    },
+
+    "artistly_agent_policy": {
+      "default": "inherit_upstream",
+      "inherit_upstream_meaning": "Nursery Rhymes first (HIGH, up to 3 validated attempts), Music Storyboard as fallback (LOW, up to 3 validated attempts).",
+      "switchable": true,
+      "alternative": "music_storyboard_first",
+      "when_to_switch": "Set this to music_storyboard_first only after observing that Nursery Rhymes handles Spanish-language audio poorly, or when a run must reuse a recurring Chiquibu character. Music Storyboard accepts a typed 150-character character-lock prompt; Nursery Rhymes has no prompt field at all and derives identity solely from the sung lyrics.",
+      "untested": true,
+      "untested_note": "Nursery Rhymes' behaviour on Spanish-language audio has not been verified in this fork. Log the outcome of the first Spanish run to WORKFLOW_STATE.json error_history before changing this setting."
+    },
+
+    "videoexpress_music_import": {
+      "replaces": "SYSTEM_PROMPT.md section 11 (Import and place the CloneVoice music)",
+      "upstream_path_unavailable": "Import from CloneVoice.ai",
+      "upstream_path_unavailable_reason": "The track never existed in CloneVoice, so the CloneVoice import panel will not list it.",
+      "required_path": "Upload the Suno MP3 into the VideoExpress media library through the Import Media sidebar's own file-upload control, then place it on the timeline exactly as upstream section 11 steps 7-8 describe.",
+      "selector_status": "UNVERIFIED",
+      "selector_discovery_rule": "The DOM selector for the VideoExpress local-upload control has not been verified in this fork. On the first run, locate it inside the Import Media / Text to Speech sidebar using the section 0.2 in-page read approach, then record the working selector under dom_api_contract in WORKFLOW_STATE.json so later runs reuse it instead of rediscovering it. Do not guess a selector and do not hand the upload to the user.",
+      "verification_unchanged": "Poll GET /api/library/get_media/4?categoryId=<CATEGORY_ID>&orderBy=id&orderDir=desc for a result whose name matches the uploaded file; capture its VideoExpress media id and duration in ms. That duration remains the authoritative audio_end. Do not trust the success toast alone.",
+      "placement_unchanged": "Drag the audio library-item onto track-row index 1 with its left edge at 0. Require exactly one audio brick on track 2."
+    },
+
+    "unchanged_from_upstream": [
+      "The mouth-locked prompt method in PROMPT_GUIDE.md and the blocking mouth_lock_check - binding and untouched",
+      "Ratio as a project-wide invariant",
+      "Dynamic scene count N",
+      "Exact audio/video endpoint matching",
+      "First-take acceptance and the no-preview minimal validation rule",
+      "The single GO approval before any credits are spent",
+      "Resume and WORKFLOW_STATE.json checkpointing",
+      "All safety rules and the in-browser-only execution contract"
+    ]
+  }
+}
